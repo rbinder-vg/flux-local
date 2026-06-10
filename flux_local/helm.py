@@ -82,6 +82,38 @@ _config_context = contextvars.ContextVar[str | None]("config_context", default=N
 _UPDATED_CACHE: set[tuple[Path, str]] = set()
 
 
+def _normalize_registry_host(value: str) -> str:
+    """Normalize an OCI registry value to a host[:port] string."""
+    host = value.strip()
+    if host.startswith("oci://"):
+        host = host[len("oci://") :]
+    return host.strip("/")
+
+
+def _parse_registry_mirror(spec: str) -> tuple[str, str]:
+    """Parse a SOURCE=TARGET registry mirror spec."""
+    source, sep, target = spec.partition("=")
+    if sep != "=" or not source.strip() or not target.strip():
+        raise HelmException(f"Invalid registry mirror '{spec}'. Expected SOURCE=TARGET")
+    return (_normalize_registry_host(source), _normalize_registry_host(target))
+
+
+def apply_registry_mirrors(url: str, mirrors: list[str] | None) -> str:
+    """Rewrite OCI URLs based on SOURCE=TARGET mirror specifications."""
+    if not mirrors or not url.startswith("oci://"):
+        return url
+
+    for mirror in mirrors:
+        source, target = _parse_registry_mirror(mirror)
+        source_prefix = f"oci://{source}"
+        if url == source_prefix:
+            return f"oci://{target}"
+        if url.startswith(source_prefix + "/"):
+            suffix = url[len(source_prefix) :]
+            return f"oci://{target}{suffix}"
+    return url
+
+
 @dataclass(kw_only=True, frozen=True)
 class LocalGitRepository:
     """A GitRepository resolved to a local path.."""
@@ -147,6 +179,7 @@ def _get_registry_config_file() -> str:
 def _chart_name(
     release: HelmRelease,
     repo: HelmRepository | OCIRepository | LocalGitRepository | None,
+    options: "Options | None" = None,
 ) -> str:
     """Return the helm chart name used for the helm template command."""
     if release.chart.repo_kind == OCI_REPOSITORY:
@@ -157,8 +190,14 @@ def _chart_name(
             )
         if isinstance(repo, OCIRepository):
             if (digest := repo.digest) is not None:
-                return repo.url + "@" + digest
-            return repo.url
+                return apply_registry_mirrors(
+                    repo.url + "@" + digest,
+                    options.registry_mirrors if options else None,
+                )
+            return apply_registry_mirrors(
+                repo.url,
+                options.registry_mirrors if options else None,
+            )
         raise HelmException(
             f"HelmRelease {release.name} expected OCIRepository but got HelmRepository {repo.repo_name}"
         )
@@ -241,6 +280,9 @@ class Options:
 
     registry_config: str | None = None
     """Value of the helm --registry-config flag."""
+
+    registry_mirrors: list[str] | None = None
+    """SOURCE=TARGET rewrites for OCI chart URLs."""
 
     is_upgrade: bool = False
     """Set .Release.IsUpgrade instead of .Release.IsInstall."""
@@ -418,7 +460,7 @@ class Helm:
                 HELM_BIN,
                 "template",
                 release.name,
-                _chart_name(release, repo),
+                _chart_name(release, repo, options),
                 "--namespace",
                 release.release_namespace,
             ]
@@ -435,7 +477,11 @@ class Helm:
                         release.chart.version,
                     ]
                 )
-            elif isinstance(repo, OCIRepository) and (repo.digest is None) and (oci_version := repo.version()):
+            elif (
+                isinstance(repo, OCIRepository)
+                and (repo.digest is None)
+                and (oci_version := repo.version())
+            ):
                 args.extend(
                     [
                         "--version",

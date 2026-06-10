@@ -127,6 +127,9 @@ class DiffKustomizationAction:
             help="Output file for the results of the command",
         )
         selector.add_ks_selector_flags(args)
+        # Accept helm-related flags (e.g. --registry-mirror) so callers can
+        # share one flag set across diff subcommands.
+        selector.add_helm_options_flags(args)
         add_diff_flags(args)
         args.set_defaults(cls=cls)
         return args

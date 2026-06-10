@@ -7,7 +7,8 @@ import pytest
 from aiofiles.os import mkdir
 
 from flux_local import kustomize
-from flux_local.helm import Helm
+from flux_local.exceptions import HelmException
+from flux_local.helm import Helm, apply_registry_mirrors
 from flux_local.manifest import (
     HelmRelease,
     HelmRepository,
@@ -132,3 +133,39 @@ async def test_oci_repository(helm: Helm, helm_releases: list[dict[str, Any]]) -
     docs = await obj.grep("kind=Deployment").objects()
     names = [doc.get("metadata", {}).get("name") for doc in docs]
     assert names == ["podinfo"]
+
+
+def test_apply_registry_mirrors_oci_url() -> None:
+    """Test rewriting OCI URL registries using mirror specs."""
+    result = apply_registry_mirrors(
+        "oci://kind-registry:5000/helm/podinfo",
+        ["kind-registry:5000=registry.example.com"],
+    )
+    assert result == "oci://registry.example.com/helm/podinfo"
+
+
+def test_apply_registry_mirrors_supports_oci_prefix_in_spec() -> None:
+    """Test mirror specs with oci:// and trailing slash values."""
+    result = apply_registry_mirrors(
+        "oci://kind-registry:5000/helm/podinfo",
+        ["oci://kind-registry:5000/=oci://registry.example.com/"],
+    )
+    assert result == "oci://registry.example.com/helm/podinfo"
+
+
+def test_apply_registry_mirrors_ignores_non_oci_url() -> None:
+    """Test that non-OCI URLs are not rewritten."""
+    result = apply_registry_mirrors(
+        "https://example.com/charts",
+        ["example.com=mirror.example.com"],
+    )
+    assert result == "https://example.com/charts"
+
+
+def test_apply_registry_mirrors_invalid_spec() -> None:
+    """Test invalid mirror specs raise an explicit exception."""
+    with pytest.raises(HelmException):
+        apply_registry_mirrors(
+            "oci://kind-registry:5000/helm/podinfo",
+            ["kind-registry:5000"],
+        )
