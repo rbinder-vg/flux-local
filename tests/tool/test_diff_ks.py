@@ -46,3 +46,19 @@ async def test_diff_ks(
     """Test test diff ks commands."""
     result = await run_command(["diff", "ks"] + args, env=env)
     assert result == snapshot
+
+
+async def test_diff_ks_accepts_registry_mirror_flag() -> None:
+    """Test diff ks accepts --registry-mirror for shared CLI invocations."""
+    result = await run_command(
+        [
+            "diff",
+            "ks",
+            "apps",
+            "--path",
+            "tests/testdata/cluster",
+            "--registry-mirror",
+            "kind-registry:5000=registry.example.com",
+        ]
+    )
+    assert isinstance(result, str)

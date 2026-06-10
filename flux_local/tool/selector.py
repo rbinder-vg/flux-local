@@ -276,6 +276,15 @@ def add_helm_options_flags(args: ArgumentParser) -> None:
         help="Path to a helm registry config file",
     )
     args.add_argument(
+        "--registry-mirror",
+        action="append",
+        default=[],
+        help=(
+            "Rewrite OCI chart registry host(s) in the form SOURCE=TARGET. "
+            "Can be specified multiple times."
+        ),
+    )
+    args.add_argument(
         "--skip-invalid-helm-release-paths",
         default=True,
         action=BooleanOptionalAction,
@@ -320,6 +329,7 @@ def build_helm_options(**kwargs) -> helm.Options:  # type: ignore[no-untyped-def
         kube_version=kwargs.get("kube_version"),
         api_versions=kwargs.get("api_versions"),
         registry_config=kwargs.get("registry_config"),
+        registry_mirrors=kwargs.get("registry_mirror", []),
         is_upgrade=kwargs.get("is_upgrade", False),
         no_hooks=kwargs.get("no_hooks", False),
         show_only=kwargs.get("show_only"),
